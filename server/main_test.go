@@ -89,31 +89,6 @@ func TestParseServerOptionsParsesValidArgs(t *testing.T) {
 	}
 }
 
-func TestParseServerOptionsParsesTelemostDataChannelArgs(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	opts, exitCode := parseServerOptions([]string{
-		"-connect", "127.0.0.1:51820",
-		"-yandex-link", "https://telemost.yandex.ru/j/test",
-		"-dc",
-	}, "server", &stdout, &stderr)
-	if exitCode != cliutil.ContinueExecution {
-		t.Fatalf("parseServerOptions() exitCode = %d, want %d", exitCode, cliutil.ContinueExecution)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got %q", stderr.String())
-	}
-	if !opts.dc {
-		t.Fatal("dc = false, want true")
-	}
-	if opts.yalink == "" {
-		t.Fatal("yalink = empty, want yandex link")
-	}
-}
-
 func TestParseServerOptionsRejectsDataChannelWithoutRoom(t *testing.T) {
 	t.Parallel()
 
@@ -127,31 +102,8 @@ func TestParseServerOptionsRejectsDataChannelWithoutRoom(t *testing.T) {
 	if exitCode != 2 {
 		t.Fatalf("parseServerOptions() exitCode = %d, want 2", exitCode)
 	}
-	if got := stderr.String(); !strings.Contains(got, "-dc requires exactly one of -yandex-link or -jazz-room") {
+	if got := stderr.String(); !strings.Contains(got, "-dc requires -jazz-room") {
 		t.Fatalf("expected dc validation error, got %q", got)
-	}
-}
-
-func TestParseServerOptionsAllowsTelemostDataChannelWithVLESS(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	opts, exitCode := parseServerOptions([]string{
-		"-connect", "127.0.0.1:51820",
-		"-yandex-link", "https://telemost.yandex.ru/j/test",
-		"-dc",
-		"-vless",
-	}, "server", &stdout, &stderr)
-	if exitCode != cliutil.ContinueExecution {
-		t.Fatalf("parseServerOptions() exitCode = %d, want %d", exitCode, cliutil.ContinueExecution)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got %q", stderr.String())
-	}
-	if !opts.dc || !opts.vlessMode {
-		t.Fatalf("expected dc and vlessMode to be true, got dc=%v vlessMode=%v", opts.dc, opts.vlessMode)
 	}
 }
 
@@ -193,7 +145,7 @@ func TestParseServerOptionsRejectsJazzDataChannelWithoutRoom(t *testing.T) {
 	if exitCode != 2 {
 		t.Fatalf("parseServerOptions() exitCode = %d, want 2", exitCode)
 	}
-	if got := stderr.String(); !strings.Contains(got, "-dc requires exactly one of -yandex-link or -jazz-room") {
+	if got := stderr.String(); !strings.Contains(got, "-dc requires -jazz-room") {
 		t.Fatalf("expected dc validation error, got %q", got)
 	}
 }

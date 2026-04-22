@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
-	"github.com/cacggghp/vk-turn-proxy/internal/telemost"
 )
 
 type dataChannelPeer interface {
@@ -18,16 +17,8 @@ type dataChannelPeer interface {
 
 type dataChannelConnectFunc func(context.Context, string, func([]byte), func()) (dataChannelPeer, error)
 
-func connectTelemostDataChannelPeer(ctx context.Context, room string, onData func([]byte), onReconnect func()) (dataChannelPeer, error) {
-	return telemost.NewConnectedPeer(ctx, room, onData, onReconnect)
-}
-
 func connectJazzDataChannelPeer(ctx context.Context, room string, onData func([]byte), onReconnect func()) (dataChannelPeer, error) {
 	return jazz.NewConnectedPeer(ctx, room, onData, onReconnect)
-}
-
-func runTelemostDataChannelMode(ctx context.Context, inviteLink, listenAddr string) error {
-	return runDataChannelMode(ctx, "Telemost", connectTelemostDataChannelPeer, inviteLink, listenAddr)
 }
 
 func runJazzDataChannelMode(ctx context.Context, room, listenAddr string) error {

@@ -130,10 +130,6 @@ func handleDCBackendStream(streamID uint16, stream *dcBackendStream, mux *dcmux.
 	wg.Wait()
 }
 
-func runTelemostDataChannelVLESSMode(ctx context.Context, inviteLink, connectAddr string) error {
-	return runDataChannelVLESSMode(ctx, "Telemost", connectTelemostDataChannelPeer, inviteLink, connectAddr)
-}
-
 func runJazzDataChannelVLESSMode(ctx context.Context, room, connectAddr string) error {
 	return runDataChannelVLESSMode(ctx, "SaluteJazz", connectJazzDataChannelPeer, room, connectAddr)
 }

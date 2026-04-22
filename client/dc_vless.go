@@ -11,10 +11,6 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/dcmux"
 )
 
-func runTelemostDataChannelVLESSMode(ctx context.Context, inviteLink, listenAddr string) error {
-	return runDataChannelVLESSMode(ctx, "Telemost", connectTelemostDataChannelPeer, inviteLink, listenAddr)
-}
-
 func runJazzDataChannelVLESSMode(ctx context.Context, room, listenAddr string) error {
 	return runDataChannelVLESSMode(ctx, "SaluteJazz", connectJazzDataChannelPeer, room, listenAddr)
 }
