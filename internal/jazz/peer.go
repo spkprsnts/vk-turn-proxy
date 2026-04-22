@@ -2,8 +2,12 @@ package jazz
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -306,7 +310,7 @@ func (p *Peer) connectOnce(ctx context.Context) error {
 		})
 	})
 
-	ws, resp, err := websocket.DefaultDialer.Dial(roomInfo.ConnectorURL, nil)
+	ws, resp, err := dialConnectorWebsocket(roomInfo.ConnectorURL)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
@@ -766,4 +770,30 @@ func sliceValue(values map[string]any, key string) []any {
 func floatValue(values map[string]any, key string) (float64, bool) {
 	value, ok := values[key].(float64)
 	return value, ok
+}
+
+func dialConnectorWebsocket(connectorURL string) (*websocket.Conn, *http.Response, error) {
+	ws, resp, err := websocket.DefaultDialer.Dial(connectorURL, nil)
+	if err == nil {
+		return ws, resp, nil
+	}
+
+	var unknownAuthErr x509.UnknownAuthorityError
+	if !errors.As(err, &unknownAuthErr) {
+		return ws, resp, err
+	}
+
+	insecureDialer := *websocket.DefaultDialer
+	if insecureDialer.TLSClientConfig == nil {
+		insecureDialer.TLSClientConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+	insecureDialer.TLSClientConfig.InsecureSkipVerify = true
+
+	log.Printf("SaluteJazz websocket TLS verify failed (%v), retrying connector with InsecureSkipVerify", err)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	return insecureDialer.Dial(connectorURL, nil)
 }
