@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
+	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
 )
 
 type dataChannelPeer interface {
@@ -23,6 +24,17 @@ func connectJazzDataChannelPeer(ctx context.Context, room string, onData func([]
 
 func runJazzDataChannelMode(ctx context.Context, room, listenAddr string) error {
 	return runDataChannelMode(ctx, "SaluteJazz", connectJazzDataChannelPeer, room, listenAddr)
+}
+
+func connectWbstreamDataChannelPeer(ctx context.Context, room string, onData func([]byte), _ func()) (dataChannelPeer, error) {
+	if room == "" || room == "any" {
+		return nil, errors.New("client requires a specific room ID via -wb-room")
+	}
+	return wbstream.NewConnectedPeer(ctx, room, onData)
+}
+
+func runWbstreamDataChannelMode(ctx context.Context, room, listenAddr string) error {
+	return runDataChannelMode(ctx, "WbStream", connectWbstreamDataChannelPeer, room, listenAddr)
 }
 
 func runDataChannelMode(ctx context.Context, providerName string, connectPeer dataChannelConnectFunc, room, listenAddr string) error {

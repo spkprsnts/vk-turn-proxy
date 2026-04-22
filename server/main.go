@@ -17,6 +17,7 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/cliutil"
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
+	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
@@ -27,6 +28,7 @@ type serverOptions struct {
 	listen    string
 	connect   string
 	jazzRoom  string
+	wbRoom    string
 	vlessMode bool
 	dc        bool
 	debug     bool
@@ -40,6 +42,7 @@ func newServerFlagSet(program string, output io.Writer) (*flag.FlagSet, *serverO
 	fs.StringVar(&opts.listen, "listen", "0.0.0.0:56000", "listen on ip:port")
 	fs.StringVar(&opts.connect, "connect", "", "connect to ip:port")
 	fs.StringVar(&opts.jazzRoom, "jazz-room", "", "SaluteJazz room \"roomId[:password]\" (use \"any\" to create)")
+	fs.StringVar(&opts.wbRoom, "wb-room", "", "WbStream room ID (use \"any\" to create)")
 	fs.BoolVar(&opts.vlessMode, "vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
 	fs.BoolVar(&opts.dc, "dc", false, "use WebRTC DataChannel instead of DTLS listener")
 	fs.BoolVar(&opts.debug, "debug", false, "enable debug logging")
@@ -49,6 +52,7 @@ func newServerFlagSet(program string, output io.Writer) (*flag.FlagSet, *serverO
 		cliutil.Fprintf(fs.Output(), "  %s -connect 127.0.0.1:51820\n", program)
 		cliutil.Fprintf(fs.Output(), "  %s -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -vless\n", program)
 		cliutil.Fprintf(fs.Output(), "  %s -connect 127.0.0.1:51820 -jazz-room any -dc\n\n", program)
+		cliutil.Fprintf(fs.Output(), "  %s -connect 127.0.0.1:51820 -wb-room any -dc\n\n", program)
 		cliutil.Fprintln(fs.Output(), "Flags:")
 		fs.PrintDefaults()
 	}
@@ -61,11 +65,14 @@ func parseServerOptions(args []string, program string, stdout, stderr io.Writer)
 		if opts.connect == "" {
 			return fmt.Errorf("-connect is required")
 		}
-		if opts.dc && opts.jazzRoom == "" {
-			return fmt.Errorf("-dc requires -jazz-room")
+		if opts.jazzRoom != "" && opts.wbRoom != "" {
+			return fmt.Errorf("-jazz-room and -wb-room are mutually exclusive")
 		}
-		if opts.jazzRoom != "" && !opts.dc {
-			return fmt.Errorf("-jazz-room requires -dc")
+		if opts.dc && opts.jazzRoom == "" && opts.wbRoom == "" {
+			return fmt.Errorf("-dc requires -jazz-room or -wb-room")
+		}
+		if (opts.jazzRoom != "" || opts.wbRoom != "") && !opts.dc {
+			return fmt.Errorf("-jazz-room/-wb-room requires -dc")
 		}
 		return nil
 	})
@@ -105,10 +112,18 @@ func main() {
 	}()
 
 	jazz.SetDebug(opts.debug)
+	wbstream.SetDebug(opts.debug)
 
 	if opts.dc && opts.jazzRoom != "" {
 		if err := runSelectedJazzDataChannelMode(ctx, opts.jazzRoom, opts.connect, opts.vlessMode); err != nil {
 			log.Fatalf("SaluteJazz DataChannel mode failed: %v", err)
+		}
+		return
+	}
+
+	if opts.dc && opts.wbRoom != "" {
+		if err := runWbstreamDataChannelMode(ctx, opts.wbRoom, opts.connect); err != nil {
+			log.Fatalf("WbStream DataChannel mode failed: %v", err)
 		}
 		return
 	}

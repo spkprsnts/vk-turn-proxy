@@ -39,6 +39,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/cliutil"
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
 	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
+	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/cbeuw/connutil"
 	"github.com/google/uuid"
@@ -90,6 +91,7 @@ type clientOptions struct {
 	listen        string
 	vklink        string
 	jazzRoom      string
+	wbRoom        string
 	peerAddr      string
 	n             int
 	udp           bool
@@ -109,6 +111,7 @@ func newClientFlagSet(program string, output io.Writer) (*flag.FlagSet, *clientO
 	fs.StringVar(&opts.listen, "listen", "127.0.0.1:9000", "listen on ip:port")
 	fs.StringVar(&opts.vklink, "vk-link", "", "VK calls invite link \"https://vk.com/call/join/...\"")
 	fs.StringVar(&opts.jazzRoom, "jazz-room", "", "SaluteJazz room \"roomId[:password]\"")
+	fs.StringVar(&opts.wbRoom, "wb-room", "", "WbStream room ID")
 	fs.StringVar(&opts.peerAddr, "peer", "", "peer server address (host:port)")
 	fs.IntVar(&opts.n, "n", 0, "connections to TURN (default 10)")
 	fs.BoolVar(&opts.udp, "udp", false, "connect to TURN with UDP")
@@ -120,7 +123,8 @@ func newClientFlagSet(program string, output io.Writer) (*flag.FlagSet, *clientO
 		cliutil.Fprintf(fs.Output(), "Usage:\n  %s -peer <host:port> -vk-link <link> [flags]\n\n", program)
 		cliutil.Fprintln(fs.Output(), "Examples:")
 		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -peer 203.0.113.10:56000 -vk-link https://vk.com/call/join/...\n", program)
-		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -jazz-room room:password -dc\n\n", program)
+		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -jazz-room <room:password> -dc\n", program)
+		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -wb-room <roomId> -dc\n\n", program)
 		cliutil.Fprintln(fs.Output(), "Flags:")
 		fs.PrintDefaults()
 	}
@@ -133,20 +137,24 @@ func parseClientOptions(args []string, program string, stdout, stderr io.Writer)
 		if !opts.dc && opts.peerAddr == "" {
 			return fmt.Errorf("-peer is required")
 		}
+		if opts.jazzRoom != "" && opts.wbRoom != "" {
+			return fmt.Errorf("-jazz-room and -wb-room are mutually exclusive")
+		}
+		dcRoom := opts.jazzRoom != "" || opts.wbRoom != ""
 		linkCount := 0
-		for _, link := range []string{opts.vklink, opts.jazzRoom} {
+		for _, link := range []string{opts.vklink, opts.jazzRoom, opts.wbRoom} {
 			if link != "" {
 				linkCount++
 			}
 		}
 		if linkCount != 1 {
-			return fmt.Errorf("exactly one of -vk-link or -jazz-room is required")
+			return fmt.Errorf("exactly one of -vk-link, -jazz-room, or -wb-room is required")
 		}
-		if opts.jazzRoom != "" && !opts.dc {
-			return fmt.Errorf("-jazz-room requires -dc")
+		if dcRoom && !opts.dc {
+			return fmt.Errorf("-jazz-room/-wb-room requires -dc")
 		}
-		if opts.dc && opts.jazzRoom == "" {
-			return fmt.Errorf("-dc requires -jazz-room")
+		if opts.dc && !dcRoom {
+			return fmt.Errorf("-dc requires -jazz-room or -wb-room")
 		}
 		return nil
 	})
@@ -1732,12 +1740,20 @@ func main() {
 
 	isDebug = opts.debug
 	jazz.SetDebug(opts.debug)
+	wbstream.SetDebug(opts.debug)
 	manualCaptcha = opts.manualCaptcha
 	autoCaptchaSliderPOC = !manualCaptcha
 
 	if opts.dc && opts.jazzRoom != "" {
 		if err := runSelectedJazzDataChannelMode(ctx, opts.jazzRoom, opts.listen, opts.vlessMode); err != nil {
 			log.Fatalf("SaluteJazz DataChannel mode failed: %v", err)
+		}
+		return
+	}
+
+	if opts.dc && opts.wbRoom != "" {
+		if err := runWbstreamDataChannelMode(ctx, opts.wbRoom, opts.listen); err != nil {
+			log.Fatalf("WbStream DataChannel mode failed: %v", err)
 		}
 		return
 	}
