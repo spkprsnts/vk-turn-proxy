@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(go build *)",
-      "Read(//c/Users/speak/go/pkg/mod/github.com/livekit/protocol@v1.45.3/logger/pionlogger/**)"
-    ]
-  }
-}
