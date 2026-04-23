@@ -15,6 +15,10 @@ func runJazzDataChannelVLESSMode(ctx context.Context, room, listenAddr string) e
 	return runDataChannelVLESSMode(ctx, "SaluteJazz", connectJazzDataChannelPeer, room, listenAddr)
 }
 
+func runWbstreamDataChannelVLESSMode(ctx context.Context, room, listenAddr string) error {
+	return runDataChannelVLESSMode(ctx, "WbStream", connectWbstreamDataChannelPeer, room, listenAddr)
+}
+
 func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPeer dataChannelConnectFunc, room, listenAddr string) error {
 	var (
 		connMu sync.Mutex

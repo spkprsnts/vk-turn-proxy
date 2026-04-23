@@ -89,6 +89,14 @@ func runSelectedJazzDataChannelMode(ctx context.Context, room, connectAddr strin
 	return runJazzDataChannelMode(ctx, room, connectAddr)
 }
 
+func runSelectedWbstreamDataChannelMode(ctx context.Context, room, connectAddr string, vlessMode bool) error {
+	if vlessMode {
+		return runWbstreamDataChannelVLESSMode(ctx, room, connectAddr)
+	}
+
+	return runWbstreamDataChannelMode(ctx, room, connectAddr)
+}
+
 func closeOnContextDone(ctx context.Context, closer io.Closer) {
 	go func() {
 		<-ctx.Done()
@@ -133,7 +141,7 @@ func main() {
 			}
 			wbRoom = strings.Join(slots, ",")
 		}
-		if err := runWbstreamDataChannelMode(ctx, wbRoom, opts.connect); err != nil {
+		if err := runSelectedWbstreamDataChannelMode(ctx, wbRoom, opts.connect, opts.vlessMode); err != nil {
 			log.Fatalf("WbStream DataChannel mode failed: %v", err)
 		}
 		return
