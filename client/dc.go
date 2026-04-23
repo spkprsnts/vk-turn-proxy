@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
@@ -27,6 +28,15 @@ func runJazzDataChannelMode(ctx context.Context, room, listenAddr string) error 
 }
 
 func connectWbstreamDataChannelPeer(ctx context.Context, room string, onData func([]byte), _ func()) (dataChannelPeer, error) {
+	parts := strings.Split(room, ",")
+	if len(parts) > 1 {
+		for _, p := range parts {
+			if p == "" || p == "any" {
+				return nil, errors.New("client requires specific room IDs via -wb-room (no \"any\" allowed)")
+			}
+		}
+		return wbstream.NewConnectedMultiPeer(ctx, parts, onData)
+	}
 	if room == "" || room == "any" {
 		return nil, errors.New("client requires a specific room ID via -wb-room")
 	}

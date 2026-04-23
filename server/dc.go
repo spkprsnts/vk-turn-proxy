@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
 	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
@@ -26,6 +27,10 @@ func runJazzDataChannelMode(ctx context.Context, room, connectAddr string) error
 }
 
 func connectWbstreamDataChannelPeer(ctx context.Context, room string, onData func([]byte), _ func()) (dataChannelPeer, error) {
+	parts := strings.Split(room, ",")
+	if len(parts) > 1 {
+		return wbstream.NewConnectedMultiPeer(ctx, parts, onData)
+	}
 	return wbstream.NewConnectedPeer(ctx, room, onData)
 }
 

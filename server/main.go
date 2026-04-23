@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ type serverOptions struct {
 	connect   string
 	jazzRoom  string
 	wbRoom    string
+	wbPeers   int
 	vlessMode bool
 	dc        bool
 	debug     bool
@@ -43,6 +45,7 @@ func newServerFlagSet(program string, output io.Writer) (*flag.FlagSet, *serverO
 	fs.StringVar(&opts.connect, "connect", "", "connect to ip:port")
 	fs.StringVar(&opts.jazzRoom, "jazz-room", "", "SaluteJazz room \"roomId[:password]\" (use \"any\" to create)")
 	fs.StringVar(&opts.wbRoom, "wb-room", "", "WbStream room ID (use \"any\" to create)")
+	fs.IntVar(&opts.wbPeers, "wb-peers", 1, "number of parallel WbStream peers for multi-peer striping")
 	fs.BoolVar(&opts.vlessMode, "vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
 	fs.BoolVar(&opts.dc, "dc", false, "use WebRTC DataChannel instead of DTLS listener")
 	fs.BoolVar(&opts.debug, "debug", false, "enable debug logging")
@@ -122,7 +125,15 @@ func main() {
 	}
 
 	if opts.dc && opts.wbRoom != "" {
-		if err := runWbstreamDataChannelMode(ctx, opts.wbRoom, opts.connect); err != nil {
+		wbRoom := opts.wbRoom
+		if opts.wbRoom == "any" && opts.wbPeers > 1 {
+			slots := make([]string, opts.wbPeers)
+			for i := range opts.wbPeers {
+				slots[i] = "any"
+			}
+			wbRoom = strings.Join(slots, ",")
+		}
+		if err := runWbstreamDataChannelMode(ctx, wbRoom, opts.connect); err != nil {
 			log.Fatalf("WbStream DataChannel mode failed: %v", err)
 		}
 		return
