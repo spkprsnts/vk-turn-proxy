@@ -550,6 +550,10 @@ Xray сервер (config.json)
 ./client -listen 127.0.0.1:9000 -jazz-room <room:password> -dc
 ```
 
+---
+
+> Реализация WBStream вдохновлена проектом https://github.com/openlibrecommunity/olcrtc
+
 ### WBStream сервер
 
 ```
