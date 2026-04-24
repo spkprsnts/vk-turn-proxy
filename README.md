@@ -32,6 +32,8 @@
   - [DataChannel](#datachannel)
     - [SaluteJazz сервер](#salutejazz-сервер)
     - [SaluteJazz клиент](#salutejazz-клиент)
+    - [WBStream сервер](#wbstream-сервер)
+    - [WBStream клиент](#wbstream-клиент)
 
 
 ## Похожие проекты
@@ -45,22 +47,15 @@
 - https://github.com/kulikov0/whitelist-bypass - проброс через медиасервер SFU
 - https://github.com/NedgNDG/vk-proxy-auto-installer - автоустановщик VK TURN Proxy (TUI)
 
-<<<<<<< dc
 ### Android
-=======
-#### Android
-##### Мои любимые
+#### Мои любимые
+- **https://github.com/spkprsnts/WireTurn**
 - https://github.com/samosvalishe/turn-proxy-android - клиент для андроида c Material 3 UI и автоапдейтами (Kotlin)
->>>>>>> main
 - https://github.com/MYSOREZ/vk-turn-proxy-android - клиент для андроида
 - https://github.com/kiper292/wireguard-turn-android - клиент для андроида интегрированный в WireGuard
-##### Ещё
+#### Ещё
 - https://github.com/WINGS-N/WINGSV - клиент для андроида с One UI, WireGuard, раздачей VPN с root
 - https://github.com/oxsidee/vkpn - клиент для андроида (кроссплатформенный Flutter)
-<<<<<<< dc
-- https://github.com/samosvalishe/turn-proxy-android - клиент для андроида c Material 3 UI и автоапдейтами (Kotlin)
-=======
->>>>>>> main
 - https://github.com/amurcanov/proxy-turn-vk-android - клиент для андроида с WireGuard
 
 ### iOS
@@ -537,7 +532,7 @@ Xray сервер (config.json)
 
 ## DataChannel
 
-Для SaluteJazz есть альтернативный режим без TURN: `-dc`.
+Для SaluteJazz и WBStream есть альтернативный режим без TURN: `-dc`.
 
 Режим работает как для обычного UDP/WireGuard-сценария, так и для `-vless`.
 
@@ -553,6 +548,20 @@ Xray сервер (config.json)
 
 ```
 ./client -listen 127.0.0.1:9000 -jazz-room <room:password> -dc
+```
+
+### WBStream сервер
+
+```
+./server -connect 127.0.0.1:<порт WG/VLESS> -wb-room any -dc
+```
+
+Сервер создаёт комнату и пишет в лог идентификатор. Вместо `any` можно указать существующую комнату. Для multi-peer режима добавьте флаг `-wb-peers N`.
+
+### WBStream клиент
+
+```
+./client -listen 127.0.0.1:9000 -wb-room <roomId> -dc
 ```
 
 
