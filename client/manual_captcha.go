@@ -127,6 +127,7 @@ func rewriteProxyRequest(req *http.Request, targetURL *neturl.URL) {
 	req.Host = targetURL.Host
 
 	req.Header.Del("Accept-Encoding")
+	req.Header.Del("TE") // Disable transfer encoding compression
 	for _, headerName := range []string{"Origin", "Referer"} {
 		if rewritten := rewriteProxyHeaderURL(req.Header.Get(headerName), targetURL); rewritten != "" {
 			req.Header.Set(headerName, rewritten)
@@ -343,7 +344,7 @@ func newCaptchaProxyTransport(dialer *dnsdialer.Dialer) *http.Transport {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		ForceAttemptHTTP2:     true,
+		ForceAttemptHTTP2:     false,
 	}
 	if dialer != nil {
 		transport.DialContext = dialer.DialContext
@@ -464,16 +465,17 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string, dialer *dnsdi
 			rewriteProxyRequest(req.Out, targetURL)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("captcha proxy error for %s: %v", r.URL.String(), err)
+			log.Printf("[Captcha Proxy] ERROR for %s %s: %v", r.Method, r.URL.String(), err)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
-			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%v</p></body></html>`, err)
+			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%s %s</p><p>%v</p></body></html>`, r.Method, r.URL.String(), err)
 		},
 		ModifyResponse: func(res *http.Response) error {
 			rewriteProxyCookies(res.Header)
 
 			if res.StatusCode >= 300 && res.StatusCode < 400 {
 				if loc := res.Header.Get("Location"); loc != "" {
+					log.Printf("[Captcha Proxy] Redirecting to: %s", loc)
 					if rewritten, ok := rewriteProxyRedirectLocation(loc, targetURL); ok {
 						res.Header.Set("Location", rewritten)
 					} else {
@@ -483,7 +485,13 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string, dialer *dnsdi
 			}
 
 			contentType := res.Header.Get("Content-Type")
-			shouldInspectBody := strings.Contains(contentType, "text/html") || strings.Contains(res.Request.URL.Path, "captchaNotRobot.check")
+			contentEncoding := res.Header.Get("Content-Encoding")
+			log.Printf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
+
+			shouldInspectBody := strings.Contains(contentType, "text/html") ||
+				strings.Contains(contentType, "application/xhtml+xml") ||
+				strings.Contains(res.Request.URL.Path, "captchaNotRobot.check")
+
 			if !shouldInspectBody {
 				return nil
 			}
@@ -523,6 +531,8 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string, dialer *dnsdi
 					"Cross-Origin-Embedder-Policy",
 					"Cross-Origin-Resource-Policy",
 					"X-Frame-Options",
+					"Strict-Transport-Security",
+					"Alt-Svc",
 				} {
 					res.Header.Del(headerName)
 				}
@@ -565,7 +575,9 @@ func solveCaptchaViaProxy(ctx context.Context, redirectURI string, dialer *dnsdi
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.String())
 		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
+			log.Printf("[Captcha Proxy] Redirecting ROOT to: %s", localCaptchaURLForTarget(targetURL))
 			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)
 			return
 		}
