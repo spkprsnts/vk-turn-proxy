@@ -1,13 +1,22 @@
-# Normalize line endings to LF in the repository
+# All text files: auto-detect, store and checkout with LF
 * text=auto eol=lf
 
-# Go source files always LF
+# Go ecosystem
 *.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
 
-# Shell scripts always LF
+# Scripts
 *.sh text eol=lf
 
-# Windows batch files use CRLF
+# Config / CI
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+Dockerfile text eol=lf
+.gitignore text eol=lf
+
+# Windows batch files — keep CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
