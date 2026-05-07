@@ -566,7 +566,7 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError, streamID in
 		return "", fmt.Errorf("failed to fetch captcha bootstrap: %w", err)
 	}
 
-	log.Printf("[STREAM %d] [Captcha] bootstrap: pow_difficulty=%d script_url_found=%v adFP=%q",
+	log.Printf("[STREAM %d] [Captcha] bootstrap: pow_difficulty=%d script_url_found=%v adFP_found=%v",
 		streamID, bootstrap.Difficulty, bootstrap.ScriptURL != "", captchaErr.AdFP != "")
 
 	hash := solvePoW(bootstrap.PowInput, bootstrap.Difficulty)
