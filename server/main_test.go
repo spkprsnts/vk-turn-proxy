@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/cliutil"
+	"github.com/spkprsnts/vk-turn-proxy/internal/cliutil"
 )
 
 func TestParseServerOptionsShowsUsageWithoutArgs(t *testing.T) {

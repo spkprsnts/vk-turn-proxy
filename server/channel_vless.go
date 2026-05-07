@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/dcmux"
+	"github.com/spkprsnts/vk-turn-proxy/internal/streammux"
 )
 
 type backendStream struct {
@@ -81,7 +81,7 @@ func (s *backendStream) write(data []byte) error {
 	return nil
 }
 
-func handleBackendStream(streamID uint16, stream *backendStream, mux *dcmux.Multiplexer, closeStream func(uint16), closeMuxStream func(uint16)) {
+func handleBackendStream(streamID uint16, stream *backendStream, mux *streammux.Multiplexer, closeStream func(uint16), closeMuxStream func(uint16)) {
 	defer closeStream(streamID)
 	defer closeMuxStream(streamID)
 
@@ -138,7 +138,7 @@ func runChannelVLESSMode(ctx context.Context, providerName string, connectPeer c
 	)
 
 	var peer channelPeer
-	mux := dcmux.New(0, func(frame []byte) error {
+	mux := streammux.New(0, func(frame []byte) error {
 		return peer.Send(frame)
 	})
 

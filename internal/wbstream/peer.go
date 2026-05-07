@@ -11,7 +11,7 @@ import (
 	"time"
 	"sync/atomic"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
+	"github.com/spkprsnts/vk-turn-proxy/internal/namegen"
 	"github.com/go-logr/stdr"
 	protoLogger "github.com/livekit/protocol/logger"
 	lksdk "github.com/livekit/server-sdk-go/v2"

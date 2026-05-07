@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
-	"github.com/cacggghp/vk-turn-proxy/internal/vp8channel"
+	"github.com/spkprsnts/vk-turn-proxy/internal/namegen"
+	"github.com/spkprsnts/vk-turn-proxy/internal/vp8channel"
 )
 
 // NewConnectedPeer creates a Telemost peer wrapped in a VP8 channel transport,

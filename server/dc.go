@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
-	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
+	"github.com/spkprsnts/vk-turn-proxy/internal/jazz"
+	"github.com/spkprsnts/vk-turn-proxy/internal/wbstream"
 )
 
 func connectJazzPeer(ctx context.Context, room string, onData func([]byte), onReconnect func()) (channelPeer, error) {

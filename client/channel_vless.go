@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/dcmux"
+	"github.com/spkprsnts/vk-turn-proxy/internal/streammux"
 )
 
-// runChannelVLESSMode multiplexes TCP connections over a channelPeer using dcmux.
+// runChannelVLESSMode multiplexes TCP connections over a channelPeer.
 func runChannelVLESSMode(ctx context.Context, providerName string, connectPeer channelConnectFunc, room, listenAddr string) error {
 	var (
 		connMu sync.Mutex
@@ -28,7 +28,7 @@ func runChannelVLESSMode(ctx context.Context, providerName string, connectPeer c
 
 	var peer channelPeer
 	clientID := uint32(time.Now().UnixNano())
-	mux := dcmux.New(clientID, func(frame []byte) error {
+	mux := streammux.New(clientID, func(frame []byte) error {
 		return peer.Send(frame)
 	})
 	peer, err := connectPeer(ctx, room, mux.HandleFrame, func() {

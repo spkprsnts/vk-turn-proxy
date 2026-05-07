@@ -15,7 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/vp8channel"
+	"github.com/spkprsnts/vk-turn-proxy/internal/logger"
+	"github.com/spkprsnts/vk-turn-proxy/internal/vp8channel"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -37,17 +38,13 @@ var (
 	ErrPeerClosed          = errors.New("peer closed")
 )
 
-var debugLogging atomic.Bool
-
 func SetDebug(enabled bool) {
-	debugLogging.Store(enabled)
+	logger.SetVerbose(enabled)
 	vp8channel.SetDebug(enabled)
 }
-func DebugEnabled() bool    { return debugLogging.Load() }
+func DebugEnabled() bool { return logger.IsVerbose() }
 func debugf(format string, args ...any) {
-	if debugLogging.Load() {
-		log.Printf(format, args...)
-	}
+	logger.Debugf(format, args...)
 }
 
 // TrafficShape defines the parameters for outgoing traffic control.
@@ -429,6 +426,7 @@ func (p *Peer) onDataChannelMessage(msg webrtc.DataChannelMessage) {
 func (p *Peer) dialWebSocket() error {
 	wsDialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
+		Proxy:            http.ProxyFromEnvironment,
 	}
 	ws, resp, err := wsDialer.Dial(p.conn.ClientConfig.MediaServerURL, nil)
 	if err != nil {

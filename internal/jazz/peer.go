@@ -12,7 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
+	"github.com/spkprsnts/vk-turn-proxy/internal/logger"
+	"github.com/spkprsnts/vk-turn-proxy/internal/namegen"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -22,8 +23,6 @@ const (
 	dataChannelLabel          = "_reliable"
 	maxDataChannelMessageSize = 12288
 )
-
-var debugLogging atomic.Bool
 
 type Peer struct {
 	roomInput string
@@ -83,17 +82,15 @@ func NewConnectedPeer(ctx context.Context, roomInput string, onData func([]byte)
 }
 
 func SetDebug(enabled bool) {
-	debugLogging.Store(enabled)
+	logger.SetVerbose(enabled)
 }
 
 func DebugEnabled() bool {
-	return debugLogging.Load()
+	return logger.IsVerbose()
 }
 
 func debugf(format string, args ...any) {
-	if DebugEnabled() {
-		log.Printf(format, args...)
-	}
+	logger.Debugf(format, args...)
 }
 
 func (p *Peer) Connect(ctx context.Context) error {
@@ -795,7 +792,7 @@ func dialConnectorWebsocket(connectorURL string) (*websocket.Conn, *http.Respons
 			MinVersion: tls.VersionTLS12,
 		}
 	}
-	insecureDialer.TLSClientConfig.InsecureSkipVerify = true
+	insecureDialer.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec
 
 	log.Printf("SaluteJazz websocket TLS verify failed (%v), retrying connector with InsecureSkipVerify", err)
 	if resp != nil && resp.Body != nil {

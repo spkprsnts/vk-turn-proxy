@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bschaatsbergen/dnsdialer"
-	"github.com/cacggghp/vk-turn-proxy/internal/cliutil"
+	"github.com/spkprsnts/vk-turn-proxy/internal/cliutil"
 )
 
 func TestParseClientOptionsShowsUsageWithoutArgs(t *testing.T) {

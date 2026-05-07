@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
+	"github.com/spkprsnts/vk-turn-proxy/internal/namegen"
 	"github.com/google/uuid"
 )
 

@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/telemost"
+	"github.com/spkprsnts/vk-turn-proxy/internal/telemost"
 )
 
 func connectTelemostPeer(ctx context.Context, roomURL string, onData func([]byte), onReconnect func()) (channelPeer, error) {

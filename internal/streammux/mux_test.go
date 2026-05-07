@@ -1,4 +1,4 @@
-package dcmux
+package streammux
 
 import (
 	"encoding/binary"

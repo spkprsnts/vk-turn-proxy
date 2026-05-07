@@ -1,4 +1,4 @@
-package dcmux
+package streammux
 
 import (
 	"encoding/binary"
@@ -75,9 +75,8 @@ func (m *Multiplexer) SendData(sid uint16, data []byte) error {
 		return nil
 	}
 
-	// 1100 bytes: VP8 frame = 20 (keepalive) + 5 (header) + 12 (dcmux hdr) + 1100 = 1137 bytes.
-	// Fits in a single RTP packet on standard WebRTC MTU 1200 paths.
-	// Multi-packet frames cause dcmux stream corruption on any dropped RTP packet.
+	// 1100 bytes: VP8 frame = 20 (keepalive) + 9 (epoch hdr) + 12 (streammux hdr) + 1100 = 1141 bytes.
+	// KCP (kcpMTU=1400) carries the full frame in one segment without fragmentation.
 	const chunkSize = 1100
 	for i := 0; i < len(data); i += chunkSize {
 		end := i + chunkSize
