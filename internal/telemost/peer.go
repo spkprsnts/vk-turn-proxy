@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/vp8channel"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -38,7 +39,10 @@ var (
 
 var debugLogging atomic.Bool
 
-func SetDebug(enabled bool) { debugLogging.Store(enabled) }
+func SetDebug(enabled bool) {
+	debugLogging.Store(enabled)
+	vp8channel.SetDebug(enabled)
+}
 func DebugEnabled() bool    { return debugLogging.Load() }
 func debugf(format string, args ...any) {
 	if debugLogging.Load() {
@@ -292,7 +296,18 @@ func (p *Peer) waitForMediaReady(ctx context.Context, timeout time.Duration) err
 		return fmt.Errorf("connect context cancelled: %w", ctx.Err())
 	}
 
-	return nil
+	if !p.hasLocalVideoTracks() {
+		return nil
+	}
+
+	select {
+	case <-p.publisherConn:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("publisher media timeout")
+	case <-ctx.Done():
+		return fmt.Errorf("connect context cancelled: %w", ctx.Err())
+	}
 }
 
 func (p *Peer) setupPeerConnections(config webrtc.Configuration) error {
@@ -309,7 +324,7 @@ func (p *Peer) setupPeerConnections(config webrtc.Configuration) error {
 			return
 		}
 
-		log.Printf("Telemost remote video track: codec=%s stream=%s track=%s", track.Codec().MimeType, track.StreamID(), track.ID())
+		debugf("Telemost remote video track: codec=%s stream=%s track=%s", track.Codec().MimeType, track.StreamID(), track.ID())
 
 		if cb := p.videoTrackHandler(); cb != nil {
 			cb(track, receiver)
@@ -339,6 +354,7 @@ func (p *Peer) onSubscriberConnectionStateChange(state webrtc.PeerConnectionStat
 	debugf("Telemost subscriber state: %s", state.String())
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
+		log.Printf("Telemost subscriber connected")
 		p.subscriberReady.Store(true)
 		closeSignal(p.subscriberConn)
 	case webrtc.PeerConnectionStateDisconnected,
@@ -356,6 +372,7 @@ func (p *Peer) onPublisherConnectionStateChange(state webrtc.PeerConnectionState
 	debugf("Telemost publisher state: %s", state.String())
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
+		log.Printf("Telemost publisher connected")
 		p.publisherReady.Store(true)
 		closeSignal(p.publisherConn)
 	case webrtc.PeerConnectionStateDisconnected,
@@ -844,7 +861,7 @@ func (p *Peer) handleSdpAnswer(answer map[string]interface{}, uid string) {
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  sdp,
 	}); err != nil {
-		debugf("Telemost SetRemoteDescription error: %v", err)
+		debugf("Telemost publisher SetRemoteDescription error: %v", err)
 	}
 	p.sendAck(uid)
 }

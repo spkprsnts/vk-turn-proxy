@@ -259,13 +259,19 @@ func (p *Peer) connectOnce(ctx context.Context) error {
 
 	pcSub.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		debugf("SaluteJazz subscriber state: %s", state.String())
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateDisconnected {
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			log.Printf("SaluteJazz subscriber connected")
+		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateDisconnected:
 			p.signalReconnectIfCurrent(session, "subscriber state "+state.String())
 		}
 	})
 	pcPub.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		debugf("SaluteJazz publisher state: %s", state.String())
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateDisconnected {
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			log.Printf("SaluteJazz publisher connected")
+		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateDisconnected:
 			p.signalReconnectIfCurrent(session, "publisher state "+state.String())
 		}
 	})

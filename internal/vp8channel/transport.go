@@ -4,10 +4,12 @@
 package vp8channel
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +25,19 @@ const (
 	connectTimeout   = 30 * time.Second
 	dataMarker       = byte(0xFF)
 	rtpBufSize       = 65536
-	tickInterval     = 10 * time.Millisecond // 100 fps; was 40ms (25 fps)
-	sampleDuration   = 10 * time.Millisecond
-	maxFramesPerTick = 16
+	tickInterval     = 5 * time.Millisecond
+	sampleDuration   = 5 * time.Millisecond
+	maxFramesPerTick = 64
 )
+
+var debugLogging atomic.Bool
+
+func SetDebug(enabled bool) { debugLogging.Store(enabled) }
+func debugf(format string, args ...any) {
+	if debugLogging.Load() {
+		log.Printf(format, args...)
+	}
+}
 
 var (
 	ErrTransportClosed = errors.New("vp8channel transport closed")
@@ -63,9 +74,10 @@ type Transport struct {
 	outbound   chan []byte
 	closeCh    chan struct{}
 	writerDone chan struct{}
-	closed     atomic.Bool
-	writerUp   atomic.Bool
-	startOnce  sync.Once
+	closed        atomic.Bool
+	writerUp      atomic.Bool
+	firstDataSent atomic.Bool
+	startOnce     sync.Once
 }
 
 // New creates a VP8 transport backed by the given session.
@@ -87,7 +99,7 @@ func New(session Session, onData func([]byte)) (*Transport, error) {
 		session:    session,
 		track:      track,
 		onData:     onData,
-		outbound:   make(chan []byte, 512),
+		outbound:   make(chan []byte, 64),
 		closeCh:    make(chan struct{}),
 		writerDone: make(chan struct{}),
 	}
@@ -118,7 +130,7 @@ func (t *Transport) Connect(ctx context.Context) error {
 }
 
 // Send queues data for transmission. Max payload is 60 KB.
-// Returns ErrOutboundFull immediately if the queue is full (caller should drop).
+// Blocks until space is available, providing backpressure to the caller.
 func (t *Transport) Send(data []byte) error {
 	if t.closed.Load() {
 		return ErrTransportClosed
@@ -131,8 +143,6 @@ func (t *Transport) Send(data []byte) error {
 		return ErrTransportClosed
 	case t.outbound <- frame:
 		return nil
-	default:
-		return ErrOutboundFull
 	}
 }
 
@@ -181,10 +191,12 @@ func (t *Transport) CanSend() bool {
 func (t *Transport) MaxPayloadSize() int { return maxPayloadSize }
 
 func (t *Transport) sendFrame(data []byte) {
-	_ = t.track.WriteSample(media.Sample{
+	if err := t.track.WriteSample(media.Sample{
 		Data:     data,
 		Duration: sampleDuration,
-	})
+	}); err != nil {
+		log.Printf("VP8 WriteSample error: %v", err)
+	}
 }
 
 func (t *Transport) writerLoop() {
@@ -217,6 +229,9 @@ func (t *Transport) sendTick() {
 	for i := 0; i < maxFramesPerTick; i++ {
 		select {
 		case frame := <-t.outbound:
+			if t.firstDataSent.CompareAndSwap(false, true) {
+				log.Printf("VP8 first data frame sent: %d bytes", len(frame))
+			}
 			t.sendFrame(frame)
 		default:
 			if i == 0 {
@@ -248,45 +263,101 @@ func (t *Transport) readVP8Track(track *webrtc.TrackRemote) {
 	var vp8Pkt codecs.VP8Packet
 	var frameBuf []byte
 	buf := make([]byte, rtpBufSize)
+	firstData := true
+
+	log.Printf("VP8 track receiving: codec=%s", track.Codec().MimeType)
+
+	var statsRTP, statsUnmarshalErr, statsVP8Err, statsS1, statsMarker, statsDelivered uint64
+	statsTicker := time.NewTicker(5 * time.Second)
+	defer statsTicker.Stop()
+
+	deliver := func() {
+		if data := extractDataFromFrame(frameBuf); data != nil {
+			statsDelivered++
+			if firstData {
+				firstData = false
+				log.Printf("VP8 first data frame received: %d bytes", len(data))
+			}
+			if t.onData != nil {
+				t.onData(data)
+			}
+		} else if len(frameBuf) >= 64 && !(len(frameBuf) == len(vp8Keepalive) && frameBuf[0] == vp8Keepalive[0]) {
+			// Only log large unexpected frames (small ones are SFU probe video)
+			debugf("VP8 deliver: unexpected frame len=%d first=0x%02x", len(frameBuf), frameBuf[0])
+		}
+	}
 
 	for {
-		n, _, err := track.Read(buf)
-		if err != nil {
-			return
+		select {
+		case <-statsTicker.C:
+			debugf("VP8 rx stats: rtp=%d unmarshalErr=%d vp8Err=%d S1=%d marker=%d delivered=%d frameBufLen=%d",
+				statsRTP, statsUnmarshalErr, statsVP8Err, statsS1, statsMarker, statsDelivered, len(frameBuf))
+		default:
 		}
 
+		n, _, err := track.Read(buf)
+		if err != nil {
+			debugf("VP8 readVP8Track ended: %v", err)
+			return
+		}
+		statsRTP++
+
 		pkt := &rtp.Packet{}
-		if pkt.Unmarshal(buf[:n]) != nil {
+		if err := pkt.Unmarshal(buf[:n]); err != nil {
+			statsUnmarshalErr++
+			log.Printf("VP8 RTP Unmarshal error: %v (n=%d)", err, n)
 			continue
 		}
 
 		vp8Payload, err := vp8Pkt.Unmarshal(pkt.Payload)
 		if err != nil {
+			statsVP8Err++
+			firstByte := byte(0)
+			if len(pkt.Payload) > 0 {
+				firstByte = pkt.Payload[0]
+			}
+			log.Printf("VP8 payload Unmarshal error: %v payload_len=%d first=0x%02x", err, len(pkt.Payload), firstByte)
 			continue
 		}
 
 		if vp8Pkt.S == 1 {
+			statsS1++
+			// S=1 means start of new frame. If the SFU stripped the Marker bit
+			// on the previous frame, deliver it now before discarding the buffer.
+			if len(frameBuf) > 0 {
+				deliver()
+			}
 			frameBuf = frameBuf[:0]
 		}
 		frameBuf = append(frameBuf, vp8Payload...)
 
 		if pkt.Marker {
-			if data := extractDataFromFrame(frameBuf); data != nil && t.onData != nil {
-				t.onData(data)
-			}
+			statsMarker++
+			deliver()
+			frameBuf = frameBuf[:0]
 		}
 	}
 }
 
 func encodeDataFrame(data []byte) []byte {
-	frame := make([]byte, 5+len(data))
-	frame[0] = dataMarker
-	binary.BigEndian.PutUint32(frame[1:5], uint32(len(data)))
-	copy(frame[5:], data)
+	// Prefix every data frame with a valid VP8 key frame so the SFU's VP8
+	// validator passes it. Without the prefix, our 0xFF marker byte makes
+	// the frame look like VP8 version 7 (invalid), which the SFU drops.
+	kLen := len(vp8Keepalive)
+	frame := make([]byte, kLen+5+len(data))
+	copy(frame, vp8Keepalive)
+	frame[kLen] = dataMarker
+	binary.BigEndian.PutUint32(frame[kLen+1:kLen+5], uint32(len(data)))
+	copy(frame[kLen+5:], data)
 	return frame
 }
 
 func extractDataFromFrame(frame []byte) []byte {
+	// Skip the VP8 key frame prefix added by encodeDataFrame.
+	kLen := len(vp8Keepalive)
+	if len(frame) > kLen && bytes.Equal(frame[:kLen], vp8Keepalive) {
+		frame = frame[kLen:]
+	}
 	if len(frame) < 5 || frame[0] != dataMarker {
 		return nil
 	}

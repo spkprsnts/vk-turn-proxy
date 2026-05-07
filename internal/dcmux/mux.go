@@ -75,7 +75,10 @@ func (m *Multiplexer) SendData(sid uint16, data []byte) error {
 		return nil
 	}
 
-	const chunkSize = 7168
+	// 1100 bytes: VP8 frame = 20 (keepalive) + 5 (header) + 12 (dcmux hdr) + 1100 = 1137 bytes.
+	// Fits in a single RTP packet on standard WebRTC MTU 1200 paths.
+	// Multi-packet frames cause dcmux stream corruption on any dropped RTP packet.
+	const chunkSize = 1100
 	for i := 0; i < len(data); i += chunkSize {
 		end := i + chunkSize
 		if end > len(data) {
