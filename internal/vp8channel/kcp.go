@@ -18,13 +18,19 @@ const kcpConvID = 0xC0FFEE01
 
 // KCP tuning targets a lossy, bursty carrier (VP8 over an SFU).
 const (
-	// Stay below kcp-go's hard MTU limit (1500) with headroom for KCP overhead (24 B).
-	kcpMTU = 1400
+	// pion VP8 packetizer splits samples larger than ~1200 bytes into multiple RTP
+	// packets. If any packet in a multi-RTP frame is lost, processRTPPacket discards
+	// the entire frame (sequence gap check), forcing KCP to retransmit all of it.
+	// Keeping MTU+epochHdrLen ≤ 1200 ensures 1 RTP packet per KCP segment, so a
+	// single loss only costs one segment retransmit, not a whole burst.
+	// 1100 + 29 (epochHdr) = 1129 bytes < 1200 ← safe margin.
+	kcpMTU = 1100
 
-	// Large windows allow in-flight bursts without stalling — one VP8 frame
-	// may carry many KCP segments while ACKs trickle back at frame cadence.
-	kcpSndWnd = 4096
-	kcpRcvWnd = 4096
+	// BDP at 20 Mbps / 100 ms RTT ≈ 232 segments @ MTU 1100 (MSS 1076 bytes).
+	// 1024 gives 4× headroom for RTT spikes; max in-flight ~1.1 MB → drains in
+	// ~0.45 s at 20 Mbps. Covers RTT fluctuations up to ~440 ms.
+	kcpSndWnd = 1024
+	kcpRcvWnd = 1024
 
 	// Length prefix for message framing on top of the KCP stream.
 	// We use stream mode because UDPSession.Write fragments messages > MSS
@@ -111,24 +117,23 @@ func (r *kcpRuntime) deliver(payload []byte) {
 }
 
 // send queues an application message for reliable delivery.
-// The length-prefix + payload pair is written under a mutex so concurrent
-// callers cannot interleave and corrupt framing.
+// Header and payload are merged into one slice so a single sess.Write() call
+// is made — with SetWriteDelay(false) each Write triggers a KCP flush, so two
+// separate writes would produce two VP8 frames where one suffices.
 func (r *kcpRuntime) send(msg []byte) error {
 	if len(msg) > kcpMaxMessage {
 		return ErrKCPMessageTooLarge
 	}
-	var hdr [kcpLenPrefix]byte
+	frame := make([]byte, kcpLenPrefix+len(msg))
 	//nolint:gosec
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(msg)))
+	binary.BigEndian.PutUint32(frame[:kcpLenPrefix], uint32(len(msg)))
+	copy(frame[kcpLenPrefix:], msg)
 
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 
-	if _, err := r.sess.Write(hdr[:]); err != nil {
-		return fmt.Errorf("kcp write header: %w", err)
-	}
-	if _, err := r.sess.Write(msg); err != nil {
-		return fmt.Errorf("kcp write payload: %w", err)
+	if _, err := r.sess.Write(frame); err != nil {
+		return fmt.Errorf("kcp write: %w", err)
 	}
 	return nil
 }

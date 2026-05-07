@@ -91,7 +91,7 @@ func runChannelVLESSMode(ctx context.Context, providerName string, connectPeer c
 
 			go func() {
 				defer close(done)
-				buf := make([]byte, 32768)
+				buf := make([]byte, 65536)
 				for {
 					n, readErr := tcpConn.Read(buf)
 					if readErr != nil {

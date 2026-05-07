@@ -92,7 +92,7 @@ func handleBackendStream(streamID uint16, stream *backendStream, mux *streammux.
 		defer wg.Done()
 		defer stream.cancel()
 
-		buf := make([]byte, 32768)
+		buf := make([]byte, 65536)
 		for {
 			n, readErr := stream.conn.Read(buf)
 			if readErr != nil {

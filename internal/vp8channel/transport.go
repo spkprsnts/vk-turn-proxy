@@ -27,8 +27,8 @@ const (
 	maxPayloadSize       = 60 * 1024
 	connectTimeout       = 60 * time.Second
 	rtpBufSize           = 65536
-	outboundQueueSize    = 1024
-	inboundQueueSize     = 1024
+	outboundQueueSize = 256 // 256 × ~1129-byte segments ≈ 289 KB; ~113 ms burst at 20 Mbps
+	inboundQueueSize  = 256 // same sizing; larger than outbound avoids drop-triggered retransmits
 	canSendHighWatermark = 90 // percent of outbound queue
 	keepaliveIdlePeriod  = 100 * time.Millisecond
 	tickInterval         = 5 * time.Millisecond
@@ -493,6 +493,7 @@ func (t *Transport) handleIncomingFrame(frame []byte) {
 
 	if !t.hadPeer.Swap(true) {
 		t.peerEpoch.Store(peerEpoch)
+		log.Printf("VP8 channel established (peer epoch=%08x)", peerEpoch)
 	} else if prev := t.peerEpoch.Load(); prev != peerEpoch {
 		// Peer restarted its KCP session. CAS guards against double-reset
 		// when fragmented frames straddle the epoch boundary.
