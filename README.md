@@ -34,6 +34,9 @@
     - [SaluteJazz клиент](#salutejazz-клиент)
     - [WBStream сервер](#wbstream-сервер)
     - [WBStream клиент](#wbstream-клиент)
+  - [VP8Channel](#vp8channel)
+    - [Telemost сервер](#telemost-сервер)
+    - [Telemost клиент](#telemost-клиент)
 
 
 ## Похожие проекты
@@ -569,3 +572,28 @@ Xray сервер (config.json)
 ```
 
 
+## VP8Channel
+
+Новый режим передачи данных (наряду с DataChannel), использующий видеопоток (VP8). На данный момент в этом режиме работает только **Telemost**.
+
+Режим работает как для обычного UDP/WireGuard-сценария, так и для `-vless`.
+
+> Реализация Telemost и самого VP8Channel основана на проекте https://github.com/openlibrecommunity/olcrtc
+
+### Telemost сервер
+
+```
+./server -connect 127.0.0.1:<порт WG/VLESS> -telemost-room https://telemost.yandex.ru/j/*** -vp8c
+```
+
+Комнату надо создать самому, но не завершать её.
+
+### Telemost клиент
+
+```
+./client -listen 127.0.0.1:9000 -telemost-room https://telemost.yandex.ru/j/*** -vp8c
+```
+
+Ссылка на комнату должна быть такой же, как и на сервере.
+
+---
