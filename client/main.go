@@ -39,6 +39,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/cliutil"
 	"github.com/cacggghp/vk-turn-proxy/internal/jazz"
 	"github.com/cacggghp/vk-turn-proxy/internal/namegen"
+	"github.com/cacggghp/vk-turn-proxy/internal/telemost"
 	"github.com/cacggghp/vk-turn-proxy/internal/wbstream"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/cbeuw/connutil"
@@ -92,11 +93,13 @@ type clientOptions struct {
 	vklink        string
 	jazzRoom      string
 	wbRoom        string
+	telemoastRoom string
 	peerAddr      string
 	n             int
 	udp           bool
 	vlessMode     bool
 	dc            bool
+	vp8c          bool
 	debug         bool
 	manualCaptcha bool
 }
@@ -112,11 +115,13 @@ func newClientFlagSet(program string, output io.Writer) (*flag.FlagSet, *clientO
 	fs.StringVar(&opts.vklink, "vk-link", "", "VK calls invite link \"https://vk.com/call/join/...\"")
 	fs.StringVar(&opts.jazzRoom, "jazz-room", "", "SaluteJazz room \"roomId[:password]\"")
 	fs.StringVar(&opts.wbRoom, "wb-room", "", "WbStream room ID")
+	fs.StringVar(&opts.telemoastRoom, "telemost-room", "", "Yandex Telemost conference URL \"https://telemost.yandex.ru/j/...\"")
 	fs.StringVar(&opts.peerAddr, "peer", "", "peer server address (host:port)")
 	fs.IntVar(&opts.n, "n", 0, "connections to TURN (default 10)")
 	fs.BoolVar(&opts.udp, "udp", false, "connect to TURN with UDP")
 	fs.BoolVar(&opts.vlessMode, "vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
 	fs.BoolVar(&opts.dc, "dc", false, "use WebRTC DataChannel instead of TURN")
+	fs.BoolVar(&opts.vp8c, "vp8c", false, "use Telemost VP8 channel instead of TURN")
 	fs.BoolVar(&opts.debug, "debug", false, "enable debug logging")
 	fs.BoolVar(&opts.manualCaptcha, "manual-captcha", false, "skip auto captcha solving, use manual mode immediately")
 	fs.Usage = func() {
@@ -124,7 +129,8 @@ func newClientFlagSet(program string, output io.Writer) (*flag.FlagSet, *clientO
 		cliutil.Fprintln(fs.Output(), "Examples:")
 		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -peer 203.0.113.10:56000 -vk-link https://vk.com/call/join/...\n", program)
 		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -jazz-room <room:password> -dc\n", program)
-		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -wb-room <roomId> -dc\n\n", program)
+		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -wb-room <roomId> -dc\n", program)
+		cliutil.Fprintf(fs.Output(), "  %s -listen 127.0.0.1:9000 -telemost-room https://telemost.yandex.ru/j/... -vp8c\n\n", program)
 		cliutil.Fprintln(fs.Output(), "Flags:")
 		fs.PrintDefaults()
 	}
@@ -134,46 +140,67 @@ func newClientFlagSet(program string, output io.Writer) (*flag.FlagSet, *clientO
 
 func parseClientOptions(args []string, program string, stdout, stderr io.Writer) (clientOptions, int) {
 	return cliutil.Parse(args, program, stdout, stderr, newClientFlagSet, func(opts *clientOptions) error {
-		if !opts.dc && opts.peerAddr == "" {
-			return fmt.Errorf("-peer is required")
+		if opts.dc && opts.vp8c {
+			return fmt.Errorf("-dc and -vp8c are mutually exclusive")
 		}
 		if opts.jazzRoom != "" && opts.wbRoom != "" {
 			return fmt.Errorf("-jazz-room and -wb-room are mutually exclusive")
 		}
-		dcRoom := opts.jazzRoom != "" || opts.wbRoom != ""
 		linkCount := 0
-		for _, link := range []string{opts.vklink, opts.jazzRoom, opts.wbRoom} {
-			if link != "" {
+		for _, v := range []string{opts.vklink, opts.jazzRoom, opts.wbRoom, opts.telemoastRoom} {
+			if v != "" {
 				linkCount++
 			}
 		}
 		if linkCount != 1 {
-			return fmt.Errorf("exactly one of -vk-link, -jazz-room, or -wb-room is required")
+			return fmt.Errorf("exactly one service flag is required: -vk-link, -jazz-room, -wb-room, or -telemost-room")
 		}
-		if dcRoom && !opts.dc {
-			return fmt.Errorf("-jazz-room/-wb-room requires -dc")
-		}
-		if opts.dc && !dcRoom {
-			return fmt.Errorf("-dc requires -jazz-room or -wb-room")
+		switch {
+		case opts.vklink != "":
+			if opts.dc || opts.vp8c {
+				return fmt.Errorf("-vk-link uses TURN: -dc and -vp8c are not applicable")
+			}
+			if opts.peerAddr == "" {
+				return fmt.Errorf("-peer is required with -vk-link")
+			}
+		case opts.jazzRoom != "" || opts.wbRoom != "":
+			if !opts.dc && !opts.vp8c {
+				return fmt.Errorf("-jazz-room and -wb-room require a channel flag: -dc or -vp8c")
+			}
+			if opts.vp8c {
+				return fmt.Errorf("-vp8c with -jazz-room/-wb-room is not yet supported, use -dc")
+			}
+		case opts.telemoastRoom != "":
+			if !opts.dc && !opts.vp8c {
+				return fmt.Errorf("-telemost-room requires a channel flag: -vp8c or -dc")
+			}
+			if opts.dc {
+				return fmt.Errorf("-dc with -telemost-room is not yet supported, use -vp8c")
+			}
 		}
 		return nil
 	})
 }
 
-func runSelectedJazzDataChannelMode(ctx context.Context, room, listenAddr string, vlessMode bool) error {
+func runSelectedJazzMode(ctx context.Context, room, listenAddr string, vlessMode bool) error {
 	if vlessMode {
-		return runJazzDataChannelVLESSMode(ctx, room, listenAddr)
+		return runJazzVLESSMode(ctx, room, listenAddr)
 	}
-
-	return runJazzDataChannelMode(ctx, room, listenAddr)
+	return runJazzMode(ctx, room, listenAddr)
 }
 
-func runSelectedWbstreamDataChannelMode(ctx context.Context, room, listenAddr string, vlessMode bool) error {
+func runSelectedWbstreamMode(ctx context.Context, room, listenAddr string, vlessMode bool) error {
 	if vlessMode {
-		return runWbstreamDataChannelVLESSMode(ctx, room, listenAddr)
+		return runWbstreamVLESSMode(ctx, room, listenAddr)
 	}
+	return runWbstreamMode(ctx, room, listenAddr)
+}
 
-	return runWbstreamDataChannelMode(ctx, room, listenAddr)
+func runSelectedTelemostMode(ctx context.Context, roomURL, listenAddr string, vlessMode bool) error {
+	if vlessMode {
+		return runTelemostVLESSMode(ctx, roomURL, listenAddr)
+	}
+	return runTelemostMode(ctx, roomURL, listenAddr)
 }
 
 func closeOnContextDone(ctx context.Context, closer io.Closer) {
@@ -1749,19 +1776,27 @@ func main() {
 	isDebug = opts.debug
 	jazz.SetDebug(opts.debug)
 	wbstream.SetDebug(opts.debug)
+	telemost.SetDebug(opts.debug)
 	manualCaptcha = opts.manualCaptcha
 	autoCaptchaSliderPOC = !manualCaptcha
 
 	if opts.dc && opts.jazzRoom != "" {
-		if err := runSelectedJazzDataChannelMode(ctx, opts.jazzRoom, opts.listen, opts.vlessMode); err != nil {
-			log.Fatalf("SaluteJazz DataChannel mode failed: %v", err)
+		if err := runSelectedJazzMode(ctx, opts.jazzRoom, opts.listen, opts.vlessMode); err != nil {
+			log.Fatalf("SaluteJazz DC mode failed: %v", err)
 		}
 		return
 	}
 
 	if opts.dc && opts.wbRoom != "" {
-		if err := runSelectedWbstreamDataChannelMode(ctx, opts.wbRoom, opts.listen, opts.vlessMode); err != nil {
-			log.Fatalf("WbStream DataChannel mode failed: %v", err)
+		if err := runSelectedWbstreamMode(ctx, opts.wbRoom, opts.listen, opts.vlessMode); err != nil {
+			log.Fatalf("WbStream DC mode failed: %v", err)
+		}
+		return
+	}
+
+	if opts.vp8c && opts.telemoastRoom != "" {
+		if err := runSelectedTelemostMode(ctx, opts.telemoastRoom, opts.listen, opts.vlessMode); err != nil {
+			log.Fatalf("Telemost VP8C mode failed: %v", err)
 		}
 		return
 	}

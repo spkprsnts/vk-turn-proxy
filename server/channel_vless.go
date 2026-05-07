@@ -14,7 +14,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/dcmux"
 )
 
-type dcBackendStream struct {
+type backendStream struct {
 	conn      net.Conn
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -24,9 +24,9 @@ type dcBackendStream struct {
 	closed    atomic.Bool
 }
 
-func newDCBackendStream(parent context.Context, conn net.Conn) *dcBackendStream {
+func newBackendStream(parent context.Context, conn net.Conn) *backendStream {
 	ctx, cancel := context.WithCancel(parent)
-	return &dcBackendStream{
+	return &backendStream{
 		conn:    conn,
 		ctx:     ctx,
 		cancel:  cancel,
@@ -34,7 +34,7 @@ func newDCBackendStream(parent context.Context, conn net.Conn) *dcBackendStream 
 	}
 }
 
-func (s *dcBackendStream) Close() {
+func (s *backendStream) Close() {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 		s.cancel()
@@ -44,7 +44,7 @@ func (s *dcBackendStream) Close() {
 	})
 }
 
-func enqueueBackendData(stream *dcBackendStream, data []byte) error {
+func enqueueBackendData(stream *backendStream, data []byte) error {
 	if stream.closed.Load() {
 		return context.Canceled
 	}
@@ -59,7 +59,7 @@ func enqueueBackendData(stream *dcBackendStream, data []byte) error {
 	}
 }
 
-func (s *dcBackendStream) write(data []byte) error {
+func (s *backendStream) write(data []byte) error {
 	if s.closed.Load() {
 		return net.ErrClosed
 	}
@@ -81,7 +81,7 @@ func (s *dcBackendStream) write(data []byte) error {
 	return nil
 }
 
-func handleDCBackendStream(streamID uint16, stream *dcBackendStream, mux *dcmux.Multiplexer, closeStream func(uint16), closeMuxStream func(uint16)) {
+func handleBackendStream(streamID uint16, stream *backendStream, mux *dcmux.Multiplexer, closeStream func(uint16), closeMuxStream func(uint16)) {
 	defer closeStream(streamID)
 	defer closeMuxStream(streamID)
 
@@ -97,7 +97,7 @@ func handleDCBackendStream(streamID uint16, stream *dcBackendStream, mux *dcmux.
 			n, readErr := stream.conn.Read(buf)
 			if readErr != nil {
 				if !errors.Is(readErr, io.EOF) && !errors.Is(readErr, net.ErrClosed) {
-					log.Printf("DataChannel VLESS backend read error: %v", readErr)
+					log.Printf("VLESS backend read error: %v", readErr)
 				}
 				return
 			}
@@ -120,7 +120,7 @@ func handleDCBackendStream(streamID uint16, stream *dcBackendStream, mux *dcmux.
 					if errors.Is(err, net.ErrClosed) || errors.Is(err, context.Canceled) || stream.closed.Load() {
 						return
 					}
-					log.Printf("DataChannel VLESS backend write error: %v", err)
+					log.Printf("VLESS backend write error: %v", err)
 					return
 				}
 			}
@@ -130,21 +130,14 @@ func handleDCBackendStream(streamID uint16, stream *dcBackendStream, mux *dcmux.
 	wg.Wait()
 }
 
-func runJazzDataChannelVLESSMode(ctx context.Context, room, connectAddr string) error {
-	return runDataChannelVLESSMode(ctx, "SaluteJazz", connectJazzDataChannelPeer, room, connectAddr)
-}
-
-func runWbstreamDataChannelVLESSMode(ctx context.Context, room, connectAddr string) error {
-	return runDataChannelVLESSMode(ctx, "WbStream", connectWbstreamDataChannelPeer, room, connectAddr)
-}
-
-func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPeer dataChannelConnectFunc, room, connectAddr string) error {
+// runChannelVLESSMode proxies TCP streams from a channelPeer to backend TCP connections.
+func runChannelVLESSMode(ctx context.Context, providerName string, connectPeer channelConnectFunc, room, connectAddr string) error {
 	var (
 		connMu sync.Mutex
-		conns  = make(map[uint16]*dcBackendStream)
+		conns  = make(map[uint16]*backendStream)
 	)
 
-	var peer dataChannelPeer
+	var peer channelPeer
 	mux := dcmux.New(0, func(frame []byte) error {
 		return peer.Send(frame)
 	})
@@ -161,7 +154,7 @@ func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPe
 
 	closeAll := func() {
 		connMu.Lock()
-		streams := make([]*dcBackendStream, 0, len(conns))
+		streams := make([]*backendStream, 0, len(conns))
 		for sid, stream := range conns {
 			streams = append(streams, stream)
 			delete(conns, sid)
@@ -178,11 +171,11 @@ func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPe
 			return
 		}
 		if err := mux.CloseStream(sid); err != nil {
-			log.Printf("%s DataChannel VLESS server: failed to close mux stream %d: %v", providerName, sid, err)
+			log.Printf("%s VLESS: failed to close mux stream %d: %v", providerName, sid, err)
 		}
 	}
 
-	getOrCreateBackendStream := func(sid uint16) (*dcBackendStream, error) {
+	getOrCreateBackendStream := func(sid uint16) (*backendStream, error) {
 		connMu.Lock()
 		stream := conns[sid]
 		connMu.Unlock()
@@ -196,7 +189,7 @@ func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPe
 			return nil, err
 		}
 
-		stream = newDCBackendStream(ctx, conn)
+		stream = newBackendStream(ctx, conn)
 
 		connMu.Lock()
 		if existing := conns[sid]; existing != nil {
@@ -207,26 +200,25 @@ func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPe
 		conns[sid] = stream
 		connMu.Unlock()
 
-		go handleDCBackendStream(sid, stream, mux, closeStream, closeMuxStream)
+		go handleBackendStream(sid, stream, mux, closeStream, closeMuxStream)
 		return stream, nil
 	}
 
 	peer, err := connectPeer(ctx, room, mux.HandleFrame, func() {
-		log.Printf("%s DataChannel VLESS server: peer reconnected, closing active backend streams", providerName)
+		log.Printf("%s VLESS: peer reconnected, closing active backend streams", providerName)
 		closeAll()
 		mux.Reset()
 	})
 	if err != nil {
 		return err
 	}
-	defer func(peer dataChannelPeer) {
-		err := peer.Close()
-		if err != nil {
-			log.Println(err)
+	defer func() {
+		if closeErr := peer.Close(); closeErr != nil {
+			log.Println(closeErr)
 		}
-	}(peer)
+	}()
 
-	log.Printf("%s DataChannel VLESS server: forwarding to %s", providerName, connectAddr)
+	log.Printf("%s VLESS: forwarding to %s", providerName, connectAddr)
 	activityCh := mux.WaitForActivity()
 
 	for {
@@ -242,13 +234,13 @@ func runDataChannelVLESSMode(ctx context.Context, providerName string, connectPe
 			if len(data) > 0 {
 				stream, err := getOrCreateBackendStream(sid)
 				if err != nil {
-					log.Printf("%s DataChannel VLESS backend dial error: %v", providerName, err)
+					log.Printf("%s VLESS backend dial error: %v", providerName, err)
 					closeMuxStream(sid)
 					continue
 				}
 				if err := enqueueBackendData(stream, data); err != nil {
 					if !errors.Is(err, context.Canceled) {
-						log.Printf("%s DataChannel VLESS backend stream %d stalled: %v", providerName, sid, err)
+						log.Printf("%s VLESS backend stream %d stalled: %v", providerName, sid, err)
 					}
 					closeStream(sid)
 					closeMuxStream(sid)

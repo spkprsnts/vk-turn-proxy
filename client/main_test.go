@@ -104,7 +104,7 @@ func TestParseClientOptionsRejectsDataChannelWithoutDataChannelRoom(t *testing.T
 	if exitCode != 2 {
 		t.Fatalf("parseClientOptions() exitCode = %d, want 2", exitCode)
 	}
-	if got := stderr.String(); !strings.Contains(got, "-dc requires -jazz-room") {
+	if got := stderr.String(); !strings.Contains(got, "-dc and -vp8c are not applicable") {
 		t.Fatalf("expected dc validation error, got %q", got)
 	}
 }
@@ -150,7 +150,7 @@ func TestParseClientOptionsRejectsJazzRoomWithoutDataChannel(t *testing.T) {
 	if exitCode != 2 {
 		t.Fatalf("parseClientOptions() exitCode = %d, want 2", exitCode)
 	}
-	if got := stderr.String(); !strings.Contains(got, "-jazz-room requires -dc") {
+	if got := stderr.String(); !strings.Contains(got, "require a channel flag") {
 		t.Fatalf("expected jazz room validation error, got %q", got)
 	}
 }
