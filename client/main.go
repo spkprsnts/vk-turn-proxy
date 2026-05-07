@@ -444,6 +444,7 @@ type VkCaptchaError struct {
 	RedirectURI             string
 	IsSoundCaptchaAvailable bool
 	SessionToken            string
+	AdFP                    string
 	CaptchaTs               string
 	CaptchaAttempt          string
 }
@@ -490,11 +491,15 @@ func ParseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 		return nil
 	}
 
-	// Extract session token if redirect_uri present
-	var sessionToken string
+	// Extract session token and adFp from redirect_uri
+	var sessionToken, adFP string
 	if RedirectURI != "" {
 		if parsed, err := neturl.Parse(RedirectURI); err == nil {
 			sessionToken = parsed.Query().Get("session_token")
+			adFP = parsed.Query().Get("adFp")
+			if adFP == "" {
+				adFP = parsed.Query().Get("adfp")
+			}
 		} else {
 			log.Printf("failed to parse redirect_uri: %v", err)
 			return nil
@@ -532,6 +537,7 @@ func ParseVkCaptchaError(errData map[string]interface{}) *VkCaptchaError {
 		RedirectURI:             RedirectURI,
 		IsSoundCaptchaAvailable: isSound,
 		SessionToken:            sessionToken,
+		AdFP:                    adFP,
 		CaptchaTs:               captchaTs,
 		CaptchaAttempt:          captchaAttempt,
 	}
@@ -560,24 +566,34 @@ func solveVkCaptcha(ctx context.Context, captchaErr *VkCaptchaError, streamID in
 		return "", fmt.Errorf("failed to fetch captcha bootstrap: %w", err)
 	}
 
-	log.Printf("[STREAM %d] [Captcha] PoW input: %s, difficulty: %d", streamID, bootstrap.PowInput, bootstrap.Difficulty)
+	log.Printf("[STREAM %d] [Captcha] bootstrap: pow_difficulty=%d script_url_found=%v adFP=%q",
+		streamID, bootstrap.Difficulty, bootstrap.ScriptURL != "", captchaErr.AdFP != "")
 
 	hash := solvePoW(bootstrap.PowInput, bootstrap.Difficulty)
 	log.Printf("[STREAM %d] [Captcha] PoW solved: hash=%s", streamID, hash)
+
+	debugInfo, err := fetchDebugInfo(ctx, bootstrap.ScriptURL, client, profile)
+	if err != nil {
+		log.Printf("[STREAM %d] [Captcha] WARNING: failed to fetch debug_info: %v", streamID, err)
+		return "", fmt.Errorf("failed to fetch debug_info: %w", err)
+	}
+	log.Printf("[STREAM %d] [Captcha] debug_info fetched: %s", streamID, debugInfo)
 
 	var successToken string
 	if useSliderPOC {
 		successToken, err = callCaptchaNotRobotWithSliderPOC(
 			ctx,
 			captchaErr.SessionToken,
+			captchaErr.AdFP,
 			hash,
 			streamID,
 			client,
 			profile,
 			bootstrap.Settings,
+			debugInfo,
 		)
 	} else {
-		successToken, err = callCaptchaNotRobot(ctx, captchaErr.SessionToken, hash, streamID, client, profile)
+		successToken, err = callCaptchaNotRobot(ctx, captchaErr.SessionToken, captchaErr.AdFP, hash, streamID, client, profile, debugInfo)
 	}
 	if err != nil {
 		return "", fmt.Errorf("captchaNotRobot API failed: %w", err)
@@ -634,30 +650,20 @@ func solvePoW(powInput string, difficulty int) string {
 	return ""
 }
 
-func callCaptchaNotRobot(ctx context.Context, sessionToken, hash string, streamID int, client tlsclient.HttpClient, profile Profile) (string, error) {
+func callCaptchaNotRobot(ctx context.Context, sessionToken, adFP, hash string, streamID int, client tlsclient.HttpClient, profile Profile, debugInfo string) (string, error) {
 	vkReq := func(method string, postData string) (map[string]interface{}, error) {
-		reqURL := "https://api.vk.ru/method/" + method + "?v=5.131"
-		parsedURL, err := neturl.Parse(reqURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse request URL: %w", err)
-		}
-		domain := parsedURL.Hostname()
+		reqURL := "https://api.vk.com/method/" + method + "?v=5.131"
 
 		req, err := fhttp.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(postData))
 		if err != nil {
 			return nil, err
 		}
 
-		req.Host = domain
 		applyBrowserProfileFhttp(req, profile)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Accept", "*/*")
-		req.Header.Set("Origin", "https://id.vk.ru")
-		req.Header.Set("Referer", "https://id.vk.ru/")
-		req.Header.Set("Sec-Fetch-Site", "same-site")
-		req.Header.Set("Sec-Fetch-Mode", "cors")
-		req.Header.Set("Sec-Fetch-Dest", "empty")
-		req.Header.Set("Sec-GPC", "1")
+		req.Header.Set("Origin", "https://id.vk.com")
+		req.Header.Set("Referer", "https://id.vk.com/")
 		req.Header.Set("Priority", "u=1, i")
 
 		httpResp, err := client.Do(req)
@@ -679,7 +685,7 @@ func callCaptchaNotRobot(ctx context.Context, sessionToken, hash string, streamI
 		return resp, nil
 	}
 
-	baseParams := fmt.Sprintf("session_token=%s&domain=vk.com&adFp=&access_token=", neturl.QueryEscape(sessionToken))
+	baseParams := fmt.Sprintf("session_token=%s&domain=vk.com&adFp=%s&access_token=", neturl.QueryEscape(sessionToken), neturl.QueryEscape(adFP))
 
 	log.Printf("[STREAM %d] [Captcha] Step 1/4: settings", streamID)
 	if _, err := vkReq("captchaNotRobot.settings", baseParams); err != nil {
@@ -700,21 +706,13 @@ func callCaptchaNotRobot(ctx context.Context, sessionToken, hash string, streamI
 	time.Sleep(200 * time.Millisecond)
 
 	log.Printf("[STREAM %d] [Captcha] Step 3/4: check", streamID)
-	cursorJSON := generateFakeCursor()
 	answer := base64.StdEncoding.EncodeToString([]byte("{}"))
-
-	// Dynamically generate debug_info to avoid static fingerprint bans
-	debugInfoBytes := md5.Sum([]byte(profile.UserAgent + strconv.FormatInt(time.Now().UnixNano(), 10)))
-	debugInfo := hex.EncodeToString(debugInfoBytes[:])
-
-	connectionRtt := "[50,50,50,50,50,50,50,50,50,50]"
-	connectionDownlink := "[9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5,9.5]"
 
 	checkData := baseParams + fmt.Sprintf(
 		"&accelerometer=%s&gyroscope=%s&motion=%s&cursor=%s&taps=%s&connectionRtt=%s&connectionDownlink=%s&browser_fp=%s&hash=%s&answer=%s&debug_info=%s",
 		neturl.QueryEscape("[]"), neturl.QueryEscape("[]"), neturl.QueryEscape("[]"),
-		neturl.QueryEscape(cursorJSON), neturl.QueryEscape("[]"), neturl.QueryEscape(connectionRtt),
-		neturl.QueryEscape(connectionDownlink),
+		neturl.QueryEscape("[]"), neturl.QueryEscape("[]"), neturl.QueryEscape("[]"),
+		neturl.QueryEscape("[]"),
 		browserFp, hash, answer, debugInfo,
 	)
 
@@ -727,9 +725,11 @@ func callCaptchaNotRobot(ctx context.Context, sessionToken, hash string, streamI
 	if !ok {
 		return "", fmt.Errorf("invalid check response: %v", checkResp)
 	}
-	status, ok := respObj["status"].(string)
-	if !ok || status != "OK" {
-		return "", fmt.Errorf("check status: %s", status)
+	status, _ := respObj["status"].(string)
+	showType, _ := respObj["show_captcha_type"].(string)
+	log.Printf("[STREAM %d] [Captcha] check response: status=%q show_captcha_type=%q", streamID, status, showType)
+	if status != "OK" {
+		return "", fmt.Errorf("check status: %s (show_type: %s)", status, showType)
 	}
 	successToken, ok := respObj["success_token"].(string)
 	if !ok || successToken == "" {
